@@ -9,33 +9,9 @@ game_state = "playing" -- playing, powerup_selection, player_levelup
 
 -- CORE GAME DATA
 function _init()
-  init_player()
   init_world()
   init_camera()
   init_effects()
-end
-
-function init_player()
-  player = {
-    x = 64, y = 100, w = 6, h = 6,
-    dx = 0, dy = 0,
-    jump_speed = -3.5, grounded = false, speed = 0.5,
-    jumps_left = 1, max_jumps = 1,
-    hearts = 3, max_hearts = 3,
-    invuln_timer = 0, base_invuln_time = 60, invuln_mult = 1.0,
-    attack_timer = 0, attacking = false, sword_size_mult = 1.0,
-    overhead_slices = 0, xp = 0, player_level = 1, xp_to_next = 10,
-    speed_mult = 1.0, jump_mult = 1.0,
-    jumps_color = {5, 8, 10},
-    coyote_timer = 0, jump_held = false, jump_released = false, apex_boost_used = false,
-    phantoms = {}, next_phantom_side = 1, vampire_chance = 0,
-    combo = 0, combo_display_timer = 0,
-    equipped_item = nil, item_cooldown = 0, max_item_cooldown = 0,
-    radar_count = 0,
-    hyper_beam_active = false,
-    hyper_beam_timer = 0,
-    hyper_beam_width = 8 -- width of the laser beam
-  }
 end
 
 function init_world()
@@ -109,7 +85,7 @@ function update_effects()
     shake_intensity *= 0.9
   end
   if combo_end_timer > 0 then combo_end_timer -= 1 end
-  if player.item_cooldown > 0 then player.item_cooldown -= 1 end
+  if item_cooldown > 0 then item_cooldown -= 1 end
   
   -- level up animations (continue even during pause)
   if levelup_active then
@@ -158,8 +134,8 @@ end
 -- INPUT HANDLING
 function handle_input()
   -- movement
-  if btn(0) then player.dx -= player.speed end
-  if btn(1) then player.dx += player.speed end
+  if btn(0) then player.dx -= speed end
+  if btn(1) then player.dx += speed end
   
   -- item usage
   if btnp(5) then use_item() end
@@ -172,29 +148,29 @@ function handle_jump_input()
   local jump_btn_currently_held = btn(4)
   
   if jump_btn_currently_held then
-    if not player.jump_held then
+    if not jump_held then
       jump()
-      player.jump_held = true
-      player.jump_released = false
+      jump_held = true
+      jump_released = false
     end
   else
-    if player.jump_held then
-      player.jump_released = true
-      player.jump_held = false
+    if jump_held then
+      jump_released = true
+      jump_held = false
     end
   end
   
   -- variable jump height
-  if player.jump_released and player.dy < 0 and player.dy < player.jump_speed * 0.5 then
+  if jump_released and player.dy < 0 and player.dy < jump_speed * 0.5 then
     player.dy *= 0.5
-    player.jump_released = false
+    jump_released = false
   end
 end
 
 -- PLAYER SYSTEMS
 function update_player_physics()
   -- apex boost
-  if not player.grounded and not player.apex_boost_used and 
+  if not grounded and not apex_boost_used and 
      player.dy > -0.5 and player.dy < 0.5 then
     
     local boost_strength = 0.8
@@ -203,13 +179,13 @@ function update_player_physics()
     if btn(0) then player.dx -= boost_strength; direction_held = true end
     if btn(1) then player.dx += boost_strength; direction_held = true end
     
-    if direction_held then player.apex_boost_used = true end
+    if direction_held then apex_boost_used = true end
   end
   
   -- coyote timer
-  if not player.grounded then
-    player.coyote_timer -= 1
-    player.coyote_timer = max(0, player.coyote_timer)
+  if not grounded then
+    coyote_timer -= 1
+    coyote_timer = max(0, coyote_timer)
   end
   
   -- physics
@@ -226,25 +202,25 @@ function update_player_physics()
   if player.x > 128 then player.x = 0 end
   
   -- update phantoms
-  for phantom in all(player.phantoms) do
+  for phantom in all(phantoms) do
     phantom.x = player.x + phantom.offset_x
     phantom.y = player.y
   end
 end
 
 function update_player_state()
-  if player.invuln_timer > 0 then player.invuln_timer -= 1 end
+  if invuln_timer > 0 then invuln_timer -= 1 end
   
-  if player.attack_timer > 0 then
-    player.attack_timer -= 1
-    if player.attack_timer <= 0 then player.attacking = false end
+  if attack_timer > 0 then
+    attack_timer -= 1
+    if attack_timer <= 0 then attacking = false end
   end
   
   -- update hyper beam
-  if player.hyper_beam_active then
-    player.hyper_beam_timer -= 1
-    if player.hyper_beam_timer <= 0 then
-      player.hyper_beam_active = false
+  if hyper_beam_active then
+    hyper_beam_timer -= 1
+    if hyper_beam_timer <= 0 then
+      hyper_beam_active = false
     else
       -- check hyper beam collisions every frame while active
       check_hyper_beam_collisions()
@@ -253,68 +229,71 @@ function update_player_state()
 end
 
 function jump()
-  local can_jump = player.grounded or player.coyote_timer > 0 or player.jumps_left > 0
+  local can_jump = grounded or coyote_timer > 0 or jumps_left > 0
   if not can_jump then return end
   
-  if not player.grounded and player.coyote_timer > 0 then
-    player.coyote_timer = 0
-  elseif not player.grounded then
-    player.jumps_left -= 1
+  if not grounded and coyote_timer > 0 then
+    coyote_timer = 0
+  elseif not grounded then
+    jumps_left -= 1
     attack()
   end
   
-  player.dy = player.jump_speed
-  player.jump_held = true
-  player.jump_released = false
-  player.apex_boost_used = false
+  player.dy = jump_speed
+  jump_held = true
+  jump_released = false
+  apex_boost_used = false
 end
 
 function refresh_jumps()
-  player.jumps_left = player.max_jumps
+  jumps_left = max_jumps
 end
 
+--TODO
+-- refactor to generalize for all items w duration
 function fire_hyper_beam()
-  player.hyper_beam_active = true
-  player.hyper_beam_timer = 300 -- 5 seconds at 60fps
+  hyper_beam_active = true
+  hyper_beam_timer = 300 -- 5 seconds at 60fps
 end
 
 -- COMBAT SYSTEM
 function attack()
-  player.attacking = true
-  player.attack_timer = 10
+  attacking = true
+  attack_timer = 10
   
-  local base_attack_w = 12
-  local base_attack_h = 12
-  local attack_w = base_attack_w * player.sword_size_mult
-  local attack_h = base_attack_h * player.sword_size_mult
+  calc_attack(player)
+
   
-  local attack_x = player.x - (attack_w - player.w) / 2
-  local attack_y = player.y + player.h - 2
+  -- phantom attacks
+  for phantom in all(phantoms) do
+    calc_attack(phantom)
+    -- local phantom_attack_x = phantom.x - (attack_w - player.w) / 2
+    -- local phantom_attack_y = phantom.y + player.h - 2
+    -- check_attack_collision(phantom_attack_x, phantom_attack_y, attack_w, attack_h)
+    
+    -- if overhead_slices > 0 then
+    --   local slice_w = 8 + overhead_slices * 4
+    --   local slice_h = 6 + overhead_slices * 2
+    --   local phantom_slice_x = phantom.x - (slice_w - player.w) / 2
+    --   local phantom_slice_y = phantom.y - slice_h - 2
+    --   check_attack_collision(phantom_slice_x, phantom_slice_y, slice_w, slice_h)
+    -- end
+  end
+end
+
+function calc_attack(entity)
+  local attack_x = entity.x - (attack_w - player.w) / 2
+  local attack_y = entity.y + player.h - 2
   
   check_attack_collision(attack_x, attack_y, attack_w, attack_h)
   
   -- overhead slice
-  if player.overhead_slices > 0 then
-    local slice_w = 8 + player.overhead_slices * 4
-    local slice_h = 6 + player.overhead_slices * 2
-    local slice_x = player.x - (slice_w - player.w) / 2
-    local slice_y = player.y - slice_h - 2
+  if overhead_slices > 0 then
+    local slice_w = 8 + overhead_slices * 4
+    local slice_h = 6 + overhead_slices * 2
+    local slice_x = entity.x - (slice_w - player.w) / 2
+    local slice_y = entity.y - slice_h - 2
     check_attack_collision(slice_x, slice_y, slice_w, slice_h)
-  end
-  
-  -- phantom attacks
-  for phantom in all(player.phantoms) do
-    local phantom_attack_x = phantom.x - (attack_w - player.w) / 2
-    local phantom_attack_y = phantom.y + player.h - 2
-    check_attack_collision(phantom_attack_x, phantom_attack_y, attack_w, attack_h)
-    
-    if player.overhead_slices > 0 then
-      local slice_w = 8 + player.overhead_slices * 4
-      local slice_h = 6 + player.overhead_slices * 2
-      local phantom_slice_x = phantom.x - (slice_w - player.w) / 2
-      local phantom_slice_y = phantom.y - slice_h - 2
-      check_attack_collision(phantom_slice_x, phantom_slice_y, slice_w, slice_h)
-    end
   end
 end
 
@@ -330,13 +309,15 @@ function check_attack_collision(attack_x, attack_y, attack_w, attack_h)
   end
 end
 
+--TODO this should be item collisions
+-- actually there should just be generic collision checks
 function check_hyper_beam_collisions()
-  if not player.hyper_beam_active then return end
+  if not hyper_beam_active then return end
   
   -- laser extends from current player position straight down to bottom of screen
   local beam_center_x = player.x + player.w/2
-  local beam_left = beam_center_x - player.hyper_beam_width/2
-  local beam_right = beam_center_x + player.hyper_beam_width/2
+  local beam_left = beam_center_x - hyper_beam_width/2
+  local beam_right = beam_center_x + hyper_beam_width/2
   
   for enemy in all(enemies) do
     if not enemy.dead and
@@ -361,9 +342,9 @@ function kill_enemy(enemy)
   enemy.dy = -1 * (1.5 + rnd(1.5))
   
   -- combo and scoring
-  player.combo += 1
+  combo += 1
   local multiplier = get_combo_multiplier()
-  player.xp += flr(5 * multiplier)
+  xp += flr(5 * multiplier)
   score += flr(10 * multiplier)
   
   -- effects
@@ -372,10 +353,10 @@ function kill_enemy(enemy)
   shake_intensity = 3
   
   -- check player level up
-  if player.xp >= player.xp_to_next then
-    player.xp -= player.xp_to_next
-    player.player_level += 1
-    player.xp_to_next += 5
+  if xp >= xp_to_next then
+    xp -= xp_to_next
+    player_level += 1
+    xp_to_next += 5
     
     -- start powerup selection with slide animation
     game_state = "powerup_selection"
@@ -387,26 +368,26 @@ function kill_enemy(enemy)
   
   refresh_jumps()
   
-  if rnd(1) < player.vampire_chance then heal() end
+  if rnd(1) < vampire_chance then heal() end
 end
 
 function get_combo_multiplier()
-  if player.combo >= 50 then return 1.4
-  elseif player.combo >= 20 then return 1.3
-  elseif player.combo >= 10 then return 1.2
-  elseif player.combo >= 5 then return 1.1
+  if combo >= 50 then return 1.4
+  elseif combo >= 20 then return 1.3
+  elseif combo >= 10 then return 1.2
+  elseif combo >= 5 then return 1.1
   else return 1.0 end
 end
 
 function end_combo()
-  if player.combo >= 5 then combo_end_timer = 90 end
-  player.combo = 0
+  if combo >= 5 then combo_end_timer = 90 end
+  combo = 0
 end
 
 function heal() 
-  player.hearts += 1
-  if player.hearts > player.max_hearts then
-    player.hearts = player.max_hearts
+  hearts += 1
+  if hearts > max_hearts then
+    hearts = max_hearts
   end
 end
 
@@ -449,8 +430,8 @@ function check_collisions()
 end
 
 function check_platform_collisions()
-  local was_grounded = player.grounded
-  player.grounded = false
+  local was_grounded = grounded
+  grounded = false
   
   for platform in all(platforms) do
     if player.dy > 0 and
@@ -461,23 +442,23 @@ function check_platform_collisions()
       
       player.y = platform.y - player.h
       player.dy = 0
-      player.grounded = true
-      player.coyote_timer = 2
-      player.jump_released = false
-      player.apex_boost_used = false
+      grounded = true
+      coyote_timer = 2
+      jump_released = false
+      apex_boost_used = false
       
       end_combo()
       refresh_jumps()
     end
   end
   
-  if was_grounded and not player.grounded then
-    player.coyote_timer = 2
+  if was_grounded and not grounded then
+    coyote_timer = 2
   end
 end
 
 function check_enemy_collisions()
-  if player.invuln_timer > 0 then return end
+  if invuln_timer > 0 then return end
   
   for enemy in all(enemies) do
     if not enemy.dead and
@@ -485,8 +466,8 @@ function check_enemy_collisions()
        player.y + player.h > enemy.y and player.y < enemy.y + enemy.h then
       
       -- player hit
-      player.hearts -= 1
-      player.invuln_timer = flr(player.base_invuln_time * player.invuln_mult)
+      hearts -= 1
+      invuln_timer = flr(invuln_time)
       end_combo()
       
       -- knockback
@@ -585,20 +566,20 @@ function update_score_and_level()
 end
 
 function check_game_over()
-  if player.y > camera_y + 150 or player.hearts <= 0 then
+  if player.y > camera_y + 150 or hearts <= 0 then
     _init()
   end
 end
 
 -- ITEM SYSTEM
 function use_item()
-  if not player.equipped_item or player.item_cooldown > 0 then return end
+  if not equipped_item or item_cooldown > 0 then return end
   
-  player.equipped_item.func()
+  equipped_item.func()
   shake_timer = 3
   shake_intensity = 1
-  player.item_cooldown = player.equipped_item.cooldown
-  player.max_item_cooldown = player.equipped_item.cooldown
+  item_cooldown = equipped_item.cooldown
+  max_item_cooldown = equipped_item.cooldown
 end
 
 -- POWERUP SYSTEM
@@ -669,38 +650,36 @@ end
 
 function apply_powerup(powerup)
   if powerup.type == "item" then
-    player.equipped_item = {
+    equipped_item = {
       name = powerup.name,
       cooldown = powerup.cooldown,
       func = powerup.func
     }
-    player.item_cooldown = 0
-    player.max_item_cooldown = powerup.cooldown
+    item_cooldown = 0
+    max_item_cooldown = powerup.cooldown
   elseif powerup.name == "apple" then
-    player.max_hearts += 1
-    player.hearts += 1
+    max_hearts += 1
+    hearts += 1
   elseif powerup.name == "jump boot" then
-    player.jump_speed = player.jump_speed + player.jump_speed * 0.2
+    jump_speed += jump_speed * 0.2
   elseif powerup.name == "coffee" then
-    player.speed = player.speed + player.speed * 0.2
+    speed += speed * 0.2
   elseif powerup.name == "air jump" then
-    player.max_jumps += 1
+    max_jumps += 1
     refresh_jumps()
   elseif powerup.name == "big sword" then
-    player.sword_size_mult += 0.2
+    attack_w += attack_w * 0.2
+    attaack_h += attack_h * 0.2
   elseif powerup.name == "sky slice" then
-    player.overhead_slices += 1
+    overhead_slices += 1
   elseif powerup.name == "armor" then
-    player.invuln_mult += 0.2
+    invuln_timer += invuln_timer * 0.2
   elseif powerup.name == "phantom" then
-    local offset_x = player.next_phantom_side * (15 + #player.phantoms * 5)
-    local phantom = {x = player.x + offset_x, y = player.y, offset_x = offset_x}
-    add(player.phantoms, phantom)
-    player.next_phantom_side *= -1
+    add(phantoms, {x = player.x + offset_x, y = player.y, offset_x = (15 + #phantoms * 5) * ((#phantoms % 2 * -2) + 1)})
   elseif powerup.name == "vampire" then
-    player.vampire_chance += 0.10
+    vampire_chance += 0.10
   elseif powerup.name == "radar" then
-    player.radar_count += 1
+    radar_count += 1
   end
 end
 
@@ -761,20 +740,18 @@ function draw_enemies()
 end
 
 function draw_phantoms()
-  for phantom in all(player.phantoms) do
-    if player.invuln_timer <= 0 or player.invuln_timer % 8 < 4 then
-      rect(phantom.x, phantom.y, phantom.x + player.w - 1, phantom.y + player.h - 1, 12)
-      pset(phantom.x + 2, phantom.y + 2, 12)
-      pset(phantom.x + 4, phantom.y + 2, 12)
-    end
+  for phantom in all(phantoms) do
+    rect(phantom.x, phantom.y, phantom.x + player.w - 1, phantom.y + player.h - 1, 12)
+    pset(phantom.x + 2, phantom.y + 2, 12)
+    pset(phantom.x + 4, phantom.y + 2, 12)
   end
 end
 
 function draw_player()
-  if player.invuln_timer <= 0 or player.invuln_timer % 8 < 4 then
-    local jump_color_index = min(player.jumps_left + 1, #player.jumps_color)
+  if invuln_timer <= 0 or invuln_timer % 8 < 4 then
+    local jump_color_index = min(jumps_left + 1, #jumps_color)
     rectfill(player.x, player.y, player.x + player.w - 1, player.y + player.h - 1, 
-             player.jumps_color[jump_color_index])
+             jumps_color[jump_color_index])
     pset(player.x + 2, player.y + 2, 0)
     pset(player.x + 4, player.y + 2, 0)
   end
@@ -790,18 +767,18 @@ function draw_effects()
 end
 
 function draw_combo()
-  if player.combo >= 5 then
-    local combo_text = tostr(player.combo)
+  if combo >= 5 then
+    local combo_text = tostr(combo)
     local text_x = player.x + player.w/2 - #combo_text * 2
     local text_y = player.y - 8
     
     rectfill(text_x - 2, text_y - 1, text_x + #combo_text * 4, text_y + 5, 0)
     
     local combo_color = 7
-    if player.combo >= 50 then combo_color = 14
-    elseif player.combo >= 20 then combo_color = 10
-    elseif player.combo >= 10 then combo_color = 9
-    elseif player.combo >= 5 then combo_color = 11 end
+    if combo >= 50 then combo_color = 14
+    elseif combo >= 20 then combo_color = 10
+    elseif combo >= 10 then combo_color = 9
+    elseif combo >= 5 then combo_color = 11 end
     
     print(combo_text, text_x, text_y, combo_color)
   end
@@ -825,34 +802,33 @@ function draw_combo_celebration()
   end
 end
 
+
+--TODO
+--create table of attacks, and use table references for collisions and drawing
 function draw_attack()
-  if player.attacking and player.attack_timer > 7 then
-    local base_attack_w = 12
-    local base_attack_h = 12
-    local attack_w = base_attack_w * player.sword_size_mult
-    local attack_h = base_attack_h * player.sword_size_mult
+  if attacking and attack_timer > 7 then
     local attack_x = player.x - (attack_w - player.w) / 2
     local attack_y = player.y + player.h - 2
     
     rect(attack_x, attack_y, attack_x + attack_w - 1, attack_y + attack_h - 1, 9)
     
-    if player.overhead_slices > 0 then
-      local slice_w = 8 + player.overhead_slices * 4
-      local slice_h = 6 + player.overhead_slices * 2
+    if overhead_slices > 0 then
+      local slice_w = 8 + overhead_slices * 4
+      local slice_h = 6 + overhead_slices * 2
       local slice_x = player.x - (slice_w - player.w) / 2
       local slice_y = player.y - slice_h - 2
       rect(slice_x, slice_y, slice_x + slice_w - 1, slice_y + slice_h - 1, 10)
     end
     
-    for phantom in all(player.phantoms) do
+    for phantom in all(phantoms) do
       local phantom_attack_x = phantom.x - (attack_w - player.w) / 2
       local phantom_attack_y = phantom.y + player.h - 2
       rect(phantom_attack_x, phantom_attack_y, 
            phantom_attack_x + attack_w - 1, phantom_attack_y + attack_h - 1, 12)
       
-      if player.overhead_slices > 0 then
-        local slice_w = 8 + player.overhead_slices * 4
-        local slice_h = 6 + player.overhead_slices * 2
+      if overhead_slices > 0 then
+        local slice_w = 8 + overhead_slices * 4
+        local slice_h = 6 + overhead_slices * 2
         local phantom_slice_x = phantom.x - (slice_w - player.w) / 2
         local phantom_slice_y = phantom.y - slice_h - 2
         rect(phantom_slice_x, phantom_slice_y, 
@@ -882,7 +858,7 @@ function draw_level_up_world()
 end
 
 function draw_hyper_beam()
-  if not player.hyper_beam_active then return end
+  if not hyper_beam_active then return end
   
   local beam_center_x = player.x + player.w/2 -- use current player position
   local beam_top_y = player.y + player.h
@@ -893,7 +869,7 @@ function draw_hyper_beam()
   local border_color = border_colors[flr(time() * 10) % 3 + 1]
   
   -- draw the beam from player position downward
-  for beam_width = player.hyper_beam_width, 1, -1 do
+  for beam_width = hyper_beam_width, 1, -1 do
     local color = 7 -- white center
     if beam_width > 4 then
       color = border_color -- crackling border
@@ -910,7 +886,7 @@ function draw_hyper_beam()
   
   -- add some crackling effects around the edges
   for i = 1, 5 do
-    local crackle_x = beam_center_x + (rnd(player.hyper_beam_width) - player.hyper_beam_width/2)
+    local crackle_x = beam_center_x + (rnd(hyper_beam_width) - hyper_beam_width/2)
     local crackle_y = beam_top_y + rnd(beam_bottom_y - beam_top_y)
     pset(crackle_x, crackle_y, border_color)
   end
@@ -933,15 +909,15 @@ end
 function draw_ui()
   print("score: " .. score, 2, 2, 7)
   print("level: " .. level, 2, 10, 7)
-  print("plv: " .. player.player_level, 2, 18, 7)
-  print("xp: " .. player.xp .. "/" .. player.xp_to_next, 2, 26, 7)
+  print("plv: " .. player_level, 2, 18, 7)
+  print("xp: " .. xp .. "/" .. xp_to_next, 2, 26, 7)
   
-  for i = 1, player.max_hearts do
+  for i = 1, max_hearts do
     local heart_x = 2 + (i - 1) * 8
-    print("♥", heart_x, 34, i <= player.hearts and 8 or 5)
+    print("♥", heart_x, 34, i <= hearts and 8 or 5)
   end
   
-  if player.equipped_item then
+  if equipped_item then
     draw_equipped_item()
   end
   
@@ -959,11 +935,12 @@ function draw_equipped_item()
   local icon_x = item_x + 4
   local icon_y = item_y + 4
   
-  if player.equipped_item.name == "jump potion" then
+  -- this switches to sprites, so shouldnt need if elses eventually
+  if equipped_item.name == "jump potion" then
     rect(icon_x + 1, icon_y + 1, icon_x + 4, icon_y + 5, 6)
     rectfill(icon_x + 2, icon_y + 2, icon_x + 3, icon_y + 4, 12)
     line(icon_x + 1, icon_y, icon_x + 4, icon_y, 6)
-  elseif player.equipped_item.name == "hyper beam" then
+  elseif equipped_item.name == "hyper beam" then
     -- laser beam icon (smaller version for UI)
     line(icon_x + 2, icon_y, icon_x + 2, icon_y + 6, 7) -- white core
     line(icon_x + 3, icon_y, icon_x + 3, icon_y + 6, 7)
@@ -976,17 +953,17 @@ function draw_equipped_item()
     pset(icon_x, icon_y + 4, crackle_color)
     pset(icon_x + 5, icon_y + 5, crackle_color)
   end  
-  if player.item_cooldown > 0 then
-    local cooldown_seconds = flr(player.item_cooldown / 60) + 1
+  if item_cooldown > 0 then
+    local cooldown_seconds = flr(item_cooldown / 60) + 1
     print(tostr(cooldown_seconds) .. "s", item_x + 2, item_y + 18, 8)
     local bar_width = 26
-    local progress = (player.max_item_cooldown - player.item_cooldown) / player.max_item_cooldown
+    local progress = (max_item_cooldown - item_cooldown) / max_item_cooldown
     rectfill(item_x + 2, item_y + 16, item_x + 2 + bar_width * progress, item_y + 16, 11)
   end
 end
 
 function draw_radar_indicators()
-  if player.radar_count <= 0 then return end
+  if radar_count <= 0 then return end
   
   -- Find enemies above the visible screen
   local upcoming_enemies = {}
@@ -1010,7 +987,7 @@ function draw_radar_indicators()
   end
   
   -- Draw indicators for the first radar_count enemies
-  for i = 1, min(player.radar_count, #upcoming_enemies) do
+  for i = 1, min(radar_count, #upcoming_enemies) do
     local enemy = upcoming_enemies[i]
     local indicator_x = enemy.x + enemy.w/2
     local indicator_y = 2
@@ -1102,7 +1079,7 @@ function draw_powerup_selection()
     print(rarity_text, rarity_x, details_y + 24, rarity_color)
     
     -- Instructions
-    print("use ←→ to select, ❎/z to confirm", slide_offset + 16, 105, 6)
+    print("use ヌ●…ヌ●★ to select, ❎/z to confirm", slide_offset + 16, 105, 6)
   end
 end
 
@@ -1219,6 +1196,49 @@ function draw_powerup_icon(powerup, icon_x, icon_y)
     pset(icon_x + 2, icon_y + 6, crackle_color)
   end
 end
+-->8
+--player and stat constants  
+  player = {
+    x = 64, y = 100, w = 6, h = 6,
+    dx = 0, dy = 0,
+    
+  }
+  jump_speed = -3.5
+  grounded = false
+  speed = 0.5
+  jumps_left = 1
+  max_jumps = 1
+  hearts = 3 
+  max_hearts = 3
+  invuln_timer = 0
+  base_invuln_time = 60
+  invuln_mult = 1.0
+  attack_timer = 0
+  attacking = false
+  attack_w = 12
+  attack_h = 12
+  overhead_slices = 0
+  xp = 0
+  player_level = 1
+  xp_to_next = 10
+  speed_mult = 1.0
+  jump_mult = 1.0
+  jumps_color = {5, 8, 10}
+  coyote_timer = 0
+  jump_held = false
+  jump_released = false
+  apex_boost_used = false
+  phantoms = {}
+  vampire_chance = 0
+  combo = 0
+  combo_display_timer = 0
+  equipped_item = nil
+  item_cooldown = 0
+  max_item_cooldown = 0
+  radar_count = 0
+  hyper_beam_active = false
+  hyper_beam_timer = 0
+  hyper_beam_width = 8 -- width of the laser beam
 __gfx__
 00000000777776666666655500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000777776666666655500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
