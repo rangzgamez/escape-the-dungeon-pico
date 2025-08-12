@@ -9,6 +9,7 @@ game_state = "playing" -- playing, powerup_selection, player_levelup
 
 -- CORE GAME DATA
 function _init()
+  init_player()
   init_world()
   init_camera()
   init_effects()
@@ -600,12 +601,13 @@ function generate_powerup_options()
     {name = "big sword", effect = "+20% sword", type = "powerup"},
     {name = "armor", effect = "+20% invuln", type = "powerup"},
     {name = "radar", effect = "show upcoming enemies", type = "powerup"},
+    {name = "phantom", effect = "ghost ally", type = "powerup"},
+
   }
   
   local rare_powers = {
     {name = "air jump", effect = "+1 max jump", type = "powerup"},
     {name = "sky slice", effect = "overhead cut", type = "powerup"},
-    {name = "phantom", effect = "ghost ally", type = "powerup"},
     {name = "vampire", effect = "chance to heal", type = "powerup"}
   }
   
@@ -669,13 +671,13 @@ function apply_powerup(powerup)
     refresh_jumps()
   elseif powerup.name == "big sword" then
     attack_w += attack_w * 0.2
-    attaack_h += attack_h * 0.2
+    attack_h += attack_h * 0.2
   elseif powerup.name == "sky slice" then
     overhead_slices += 1
   elseif powerup.name == "armor" then
-    invuln_timer += invuln_timer * 0.2
+    invuln_time += invuln_time * 0.2
   elseif powerup.name == "phantom" then
-    add(phantoms, {x = player.x + offset_x, y = player.y, offset_x = (15 + #phantoms * 5) * ((#phantoms % 2 * -2) + 1)})
+    add(phantoms, {x = player.x, y = player.y, offset_x = (15 + #phantoms * 5) * ((#phantoms % 2 * -2) + 1)})
   elseif powerup.name == "vampire" then
     vampire_chance += 0.10
   elseif powerup.name == "radar" then
@@ -1197,7 +1199,8 @@ function draw_powerup_icon(powerup, icon_x, icon_y)
   end
 end
 -->8
---player and stat constants  
+--player and stats
+function init_player()
   player = {
     x = 64, y = 100, w = 6, h = 6,
     dx = 0, dy = 0,
@@ -1211,7 +1214,7 @@ end
   hearts = 3 
   max_hearts = 3
   invuln_timer = 0
-  base_invuln_time = 60
+  invuln_time = 60
   invuln_mult = 1.0
   attack_timer = 0
   attacking = false
@@ -1239,6 +1242,7 @@ end
   hyper_beam_active = false
   hyper_beam_timer = 0
   hyper_beam_width = 8 -- width of the laser beam
+end
 __gfx__
 00000000777776666666655500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000777776666666655500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
