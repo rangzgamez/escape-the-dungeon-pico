@@ -5,7 +5,7 @@ __lua__
 -- Cleaner structure with separated concerns
 
 -- GAME STATE MANAGEMENT
-game_state = "playing" -- playing, powerup_selection, player_levelup
+game_state = "playing" -- playing, powerup_selection, gameover
 
 -- CORE GAME DATA
 function _init()
@@ -64,11 +64,23 @@ function init_effects()
   powerup_slide_timer = 0
   powerup_slide_duration = 30 -- frames to slide in
   powerup_fully_visible = false
+  
+  -- gameover state variables
+  gameover_cursor = 1
+  gameover_slide_timer = 0
+  gameover_slide_duration = 30
+  gameover_fully_visible = false
+  final_score = 0
+  
+  -- simple input delay to prevent button bleed
+  startup_delay = 6 -- frames to block input after restart
 end
 
 -- MAIN UPDATE LOOP
 function _update()
   update_effects()
+  
+
   
   if freeze_timer > 0 then return end
   
@@ -76,10 +88,13 @@ function _update()
     update_playing()
   elseif game_state == "powerup_selection" then
     update_powerup_selection()
+  elseif game_state == "gameover" then
+    update_gameover()
   end
 end
 
 function update_effects()
+  if startup_delay > 0 then startup_delay -= 1 end
   if freeze_timer > 0 then freeze_timer -= 1 end
   if shake_timer > 0 then
     shake_timer -= 1
@@ -132,8 +147,39 @@ function update_powerup_selection()
   end
 end
 
+function update_gameover()
+  -- Update slide animation
+  if gameover_slide_timer < gameover_slide_duration then
+    gameover_slide_timer += 1
+    if gameover_slide_timer >= gameover_slide_duration then
+      gameover_fully_visible = true
+    end
+    return -- don't allow input during slide
+  end
+  
+  -- Only allow input once fully visible
+  if gameover_fully_visible then
+    if btnp(2) and gameover_cursor > 1 then gameover_cursor -= 1 end
+    if btnp(3) and gameover_cursor < 2 then gameover_cursor += 1 end
+    
+    if btnp(4) or btnp(5) then
+      if gameover_cursor == 1 then
+        -- retry
+        _init()
+        game_state = "playing"
+      else
+        -- quit - for now just restart, but could add title screen later
+        _init()
+        game_state = "playing"
+      end
+    end
+  end
+end
+
 -- INPUT HANDLING
 function handle_input()
+  -- block input for a few frames after restart to prevent button bleed
+  if startup_delay > 0 then return end
   -- movement
   if btn(0) then player.dx -= speed end
   if btn(1) then player.dx += speed end
@@ -568,7 +614,12 @@ end
 
 function check_game_over()
   if player.y > camera_y + 150 or hearts <= 0 then
-    _init()
+    -- transition to gameover instead of immediately restarting
+    game_state = "gameover"
+    final_score = score
+    gameover_cursor = 1
+    gameover_slide_timer = 0
+    gameover_fully_visible = false
   end
 end
 
@@ -591,29 +642,39 @@ function shuffle(t)
   end
 end
 
+--4399
+--4374
+
+--4361
 function generate_powerup_options()
   powerup_options = {}
   
   local common_powers = {
-    {name = "apple", effect = "+1 maxhp", type = "powerup"},
-    {name = "jump boot", effect = "jump higher", type = "powerup"},
-    {name = "coffee", effect = "move faster", type = "powerup"},
-    {name = "big sword", effect = "+20% sword", type = "powerup"},
-    {name = "armor", effect = "+20% invuln", type = "powerup"},
-    {name = "radar", effect = "show upcoming enemies", type = "powerup"},
-    {name = "phantom", effect = "ghost ally", type = "powerup"},
-
+    {name = "apple", effect = "+1 maxhp", type = "powerup", spr = 7, func = function ()
+      hearts += 1
+      max_hearts += 1
+    end},
+    {name = "jump boot", effect = "jump higher", type = "powerup", spr = 2, func = function () jump_speed *= 1.2 end},
+    {name = "coffee", effect = "move faster", type = "powerup", spr = 1, func = function () speed *= 1.2 end},
+    {name = "big sword", effect = "+20% sword", type = "powerup", spr = 10, func = function () 
+      attack_w *= 1.2
+      attack_h *= 1.2
+    end},
+    {name = "armor", effect = "+20% invuln", type = "powerup", spr = 9, func = function () invuln_time *= 1.2 end},
+    {name = "radar", effect = "show upcoming enemies", type = "powerup", func = function () radar_count += 1 end},
   }
   
   local rare_powers = {
-    {name = "air jump", effect = "+1 max jump", type = "powerup"},
-    {name = "sky slice", effect = "overhead cut", type = "powerup"},
-    {name = "vampire", effect = "chance to heal", type = "powerup"}
+    {name = "air jump", effect = "+1 max jump", type = "powerup", spr = 11, func = function () max_jumps += 1 end},
+    {name = "sky slice", effect = "overhead cut", type = "powerup", spr = 4, func = function () overhead_slices += 1 end},
+    {name = "vampire", effect = "chance to heal", type = "powerup", spr = 0, func = function () vampire_chance += .1 end},
+    {name = "phantom", effect = "ghost ally", type = "powerup", spr = 8, func = function () add(phantoms, {x = player.x, y = player.y, offset_x = (15 + #phantoms * 5) * ((#phantoms % 2 * -2) + 1)}) end},
+
   }
   
   local common_items = {
-    {name = "jump potion", effect = "refresh jumps", type = "item", cooldown = 300, func = refresh_jumps},
-    {name = "hyper beam", effect = "fire a powerful laser", type = "item", cooldown = 1200, func = fire_hyper_beam}
+    {name = "jump potion", effect = "refresh jumps", type = "item", cooldown = 300, func = refresh_jumps, spr = 6},
+    {name = "hyper beam", effect = "big laser", type = "item", cooldown = 1200, func = fire_hyper_beam, spr = 5}
   }
   
   local rare_items = {}
@@ -652,37 +713,13 @@ end
 
 function apply_powerup(powerup)
   if powerup.type == "item" then
-    equipped_item = {
-      name = powerup.name,
-      cooldown = powerup.cooldown,
-      func = powerup.func
-    }
+    equipped_item = powerup
     item_cooldown = 0
     max_item_cooldown = powerup.cooldown
-  elseif powerup.name == "apple" then
-    max_hearts += 1
-    hearts += 1
-  elseif powerup.name == "jump boot" then
-    jump_speed += jump_speed * 0.2
-  elseif powerup.name == "coffee" then
-    speed += speed * 0.2
-  elseif powerup.name == "air jump" then
-    max_jumps += 1
-    refresh_jumps()
-  elseif powerup.name == "big sword" then
-    attack_w += attack_w * 0.2
-    attack_h += attack_h * 0.2
-  elseif powerup.name == "sky slice" then
-    overhead_slices += 1
-  elseif powerup.name == "armor" then
-    invuln_time += invuln_time * 0.2
-  elseif powerup.name == "phantom" then
-    add(phantoms, {x = player.x, y = player.y, offset_x = (15 + #phantoms * 5) * ((#phantoms % 2 * -2) + 1)})
-  elseif powerup.name == "vampire" then
-    vampire_chance += 0.10
-  elseif powerup.name == "radar" then
-    radar_count += 1
+    return
   end
+  powerup.func()
+
 end
 
 -- DRAWING SYSTEM
@@ -706,6 +743,8 @@ function _draw()
   
   if game_state == "powerup_selection" then
     draw_powerup_selection()
+  elseif game_state == "gameover" then
+    draw_gameover()
   end
 end
 
@@ -933,28 +972,9 @@ function draw_equipped_item()
   print("❎",item_x+4,item_y - 7, 8);
   rectfill(item_x, item_y, item_x + 14, item_y + 14, 0)
   rect(item_x, item_y, item_x + 14, item_y + 14, 7)
-  
-  local icon_x = item_x + 4
-  local icon_y = item_y + 4
-  
-  -- this switches to sprites, so shouldnt need if elses eventually
-  if equipped_item.name == "jump potion" then
-    rect(icon_x + 1, icon_y + 1, icon_x + 4, icon_y + 5, 6)
-    rectfill(icon_x + 2, icon_y + 2, icon_x + 3, icon_y + 4, 12)
-    line(icon_x + 1, icon_y, icon_x + 4, icon_y, 6)
-  elseif equipped_item.name == "hyper beam" then
-    -- laser beam icon (smaller version for UI)
-    line(icon_x + 2, icon_y, icon_x + 2, icon_y + 6, 7) -- white core
-    line(icon_x + 3, icon_y, icon_x + 3, icon_y + 6, 7)
-    -- crackling edges
-    local crackle_color = 12
-    if flr(time() * 8) % 3 == 0 then crackle_color = 8
-    elseif flr(time() * 8) % 3 == 1 then crackle_color = 10 end
-    pset(icon_x + 1, icon_y + 1, crackle_color)
-    pset(icon_x + 4, icon_y + 2, crackle_color)
-    pset(icon_x, icon_y + 4, crackle_color)
-    pset(icon_x + 5, icon_y + 5, crackle_color)
-  end  
+    
+  spr(equipped_item.spr, item_x + 4, item_y + 4)
+
   if item_cooldown > 0 then
     local cooldown_seconds = flr(item_cooldown / 60) + 1
     print(tostr(cooldown_seconds) .. "s", item_x + 2, item_y + 18, 8)
@@ -1048,8 +1068,8 @@ function draw_powerup_selection()
     rect(rect_x, rect_y, rect_x + rect_w, rect_y + rect_h, border_color)
     
     -- Draw icon centered in box
-    draw_powerup_icon(powerup_options[i], rect_x + rect_w/2 - 4, rect_y + rect_h/2 - 4)
-    
+    spr(powerup_options[i].spr,rect_x + rect_w/2 - 4, rect_y + rect_h/2 - 4)
+
     -- Small rarity indicator in corner
     local rarity_color = powerup_options[i].rarity == "rare" and 14 or 7
     print(sub(powerup_options[i].rarity, 1, 1), rect_x + 2, rect_y + 2, rarity_color)
@@ -1085,119 +1105,47 @@ function draw_powerup_selection()
   end
 end
 
-function draw_powerup_icon(powerup, icon_x, icon_y)
-  if powerup.name == "apple" then
-    -- heart icon
-    rectfill(icon_x + 1, icon_y, icon_x + 2, icon_y, 8)
-    rectfill(icon_x + 5, icon_y, icon_x + 6, icon_y, 8)
-    rectfill(icon_x, icon_y + 1, icon_x + 7, icon_y + 2, 8)
-    rectfill(icon_x + 1, icon_y + 3, icon_x + 6, icon_y + 3, 8)
-    rectfill(icon_x + 2, icon_y + 4, icon_x + 5, icon_y + 4, 8)
-    rectfill(icon_x + 3, icon_y + 5, icon_x + 4, icon_y + 5, 8)
+function draw_gameover()
+  -- Calculate slide animation offset
+  local slide_progress = gameover_slide_timer / gameover_slide_duration
+  slide_progress = min(slide_progress, 1) -- clamp to 1
+  
+  -- Ease-out animation (starts fast, slows down)
+  slide_progress = 1 - (1 - slide_progress) * (1 - slide_progress)
+  
+  local slide_offset = -128 + slide_progress * 128 -- starts at -128 (off-screen left), ends at 0
+  
+  -- Background (slides in too)
+  rectfill(slide_offset, 30, slide_offset + 128, 98, 0)
+  rect(slide_offset, 30, slide_offset + 128, 98, 8)
+  
+  -- Title
+  print("you died...", slide_offset + 42, 40, 8)
+  
+  -- Final score
+  local score_text = "final score: " .. final_score
+  local score_x = slide_offset + 64 - #score_text * 2
+  print(score_text, score_x, 52, 7)
+  
+  -- Menu options
+  local retry_color = gameover_cursor == 1 and 11 or 6
+  local quit_color = gameover_cursor == 2 and 11 or 6
+  
+  -- Only show options and cursor when fully visible
+  if gameover_fully_visible then
+    -- cursor indicator
+    local cursor_x = slide_offset + 35
+    local cursor_y = gameover_cursor == 1 and 66 or 78
+    print("*", cursor_x, cursor_y, 10)
     
-  elseif powerup.name == "jump boot" then
-    -- boot with upward arrows
-    rectfill(icon_x + 2, icon_y, icon_x + 5, icon_y + 2, 12)
-    rectfill(icon_x, icon_y + 3, icon_x + 7, icon_y + 5, 12)
-    pset(icon_x + 3, icon_y - 2, 7)
-    line(icon_x + 2, icon_y - 1, icon_x + 4, icon_y - 1, 7)
-    pset(icon_x + 6, icon_y - 2, 7)
-    line(icon_x + 5, icon_y - 1, icon_x + 7, icon_y - 1, 7)
+    print("retry", slide_offset + 44, 66, retry_color)
+    print("quit", slide_offset + 46, 78, quit_color)
     
-  elseif powerup.name == "coffee" then
-    -- lightning bolt icon
-    line(icon_x + 3, icon_y, icon_x + 1, icon_y + 3, 10)
-    line(icon_x + 1, icon_y + 3, icon_x + 4, icon_y + 3, 10)
-    line(icon_x + 4, icon_y + 3, icon_x + 2, icon_y + 6, 10)
-    pset(icon_x + 5, icon_y + 2, 10)
-    pset(icon_x, icon_y + 4, 10)
-    
-  elseif powerup.name == "air jump" then
-    -- double jump icon (two boots stacked)
-    rectfill(icon_x + 1, icon_y - 1, icon_x + 4, icon_y + 1, 11)
-    rectfill(icon_x + 2, icon_y + 2, icon_x + 5, icon_y + 4, 12)
-    
-  elseif powerup.name == "big sword" then
-    -- sword icon
-    line(icon_x + 3, icon_y, icon_x + 3, icon_y + 4, 6)
-    line(icon_x + 2, icon_y + 5, icon_x + 4, icon_y + 5, 4)
-    line(icon_x + 3, icon_y + 6, icon_x + 3, icon_y + 7, 9)
-    
-  elseif powerup.name == "sky slice" then
-    -- overhead slice icon (arc above)
-    circfill(icon_x + 3, icon_y + 4, 3, 0)
-    circfill(icon_x + 3, icon_y + 4, 2, 10)
-    -- arc above
-    for a = 0.25, 0.75, 0.1 do
-      local px = icon_x + 3 + cos(a) * 4
-      local py = icon_y + 4 + sin(a) * 4
-      pset(px, py, 10)
-    end
-    
-  elseif powerup.name == "armor" then
-    -- shield icon
-    rectfill(icon_x + 2, icon_y + 1, icon_x + 5, icon_y + 5, 6)
-    pset(icon_x + 3, icon_y, 6)
-    pset(icon_x + 4, icon_y, 6)
-    line(icon_x + 3, icon_y + 2, icon_x + 4, icon_y + 4, 7)
-    
-  elseif powerup.name == "phantom" then
-    -- phantom icon (ghostly outlines)
-    rect(icon_x + 1, icon_y + 1, icon_x + 3, icon_y + 4, 12)
-    rect(icon_x + 4, icon_y + 1, icon_x + 6, icon_y + 4, 12)
-    rectfill(icon_x + 2, icon_y + 2, icon_x + 4, icon_y + 4, 7)
-    
-  elseif powerup.name == "vampire" then
-    -- vampire fangs with blood drop
-    pset(icon_x + 2, icon_y + 1, 7)
-    pset(icon_x + 5, icon_y + 1, 7)
-    pset(icon_x + 2, icon_y + 2, 7)
-    pset(icon_x + 5, icon_y + 2, 7)
-    pset(icon_x + 3, icon_y + 4, 8)
-    pset(icon_x + 3, icon_y + 5, 8)
-    pset(icon_x + 4, icon_y + 5, 8)
-    circfill(icon_x + 3, icon_y + 6, 1, 8)
-    
-  elseif powerup.name == "jump potion" then
-    -- potion bottle
-    rect(icon_x + 2, icon_y + 2, icon_x + 5, icon_y + 6, 6)
-    pset(icon_x + 3, icon_y + 1, 6)
-    pset(icon_x + 4, icon_y + 1, 6)
-    line(icon_x + 2, icon_y, icon_x + 5, icon_y, 6)
-    rectfill(icon_x + 3, icon_y + 3, icon_x + 4, icon_y + 5, 12)
-    pset(icon_x + 3, icon_y - 1, 4)
-    pset(icon_x + 4, icon_y - 1, 4)
-    
-  elseif powerup.name == "radar" then
-    -- radar/scanner icon (circular with sweeping line)
-    circ(icon_x + 3, icon_y + 3, 3, 11) -- outer circle
-    circ(icon_x + 3, icon_y + 3, 1, 11) -- inner circle
-    -- sweeping radar line
-    local angle = time() * 2 -- rotating line
-    local line_x = icon_x + 3 + cos(angle) * 3
-    local line_y = icon_y + 3 + sin(angle) * 3
-    line(icon_x + 3, icon_y + 3, line_x, line_y, 10)
-    -- small blips
-    pset(icon_x + 1, icon_y + 1, 8)
-    pset(icon_x + 5, icon_y + 2, 8)
-    
-  elseif powerup.name == "hyper beam" then
-    -- laser beam icon
-    -- central beam
-    line(icon_x + 3, icon_y, icon_x + 3, icon_y + 7, 7) -- white core
-    line(icon_x + 4, icon_y, icon_x + 4, icon_y + 7, 7)
-    -- crackling edges
-    local crackle_color = 12 -- light blue
-    if flr(time() * 8) % 3 == 0 then crackle_color = 8 -- red
-    elseif flr(time() * 8) % 3 == 1 then crackle_color = 10 end -- yellow
-    
-    pset(icon_x + 2, icon_y + 1, crackle_color)
-    pset(icon_x + 5, icon_y + 2, crackle_color)
-    pset(icon_x + 1, icon_y + 4, crackle_color)
-    pset(icon_x + 6, icon_y + 5, crackle_color)
-    pset(icon_x + 2, icon_y + 6, crackle_color)
+    -- Instructions
+    print("use ヌ●♪ヌ●ヌ▥つ to select, ❎/z to confirm", slide_offset + 8, 88, 5)
   end
 end
+
 -->8
 --player and stats
 function init_player()
@@ -1244,22 +1192,14 @@ function init_player()
   hyper_beam_width = 8 -- width of the laser beam
 end
 __gfx__
-00000000777776666666655500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000777776666666655500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00700700777776666666655500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00077000777776666666666600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00077000777777666666666600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00700700777776666666666600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000777777666666666600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000777777766666666600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000777777776666666600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000777777776666666600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000777777777666666600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000777777777776666600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000077777777777666600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000007777777777766600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000777777777766600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000077777770000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000006006000000111000333333007767770a8c77a8a00242000033000000077770000000000000440006677000000000000000000000000000000000000
+000000000060060000cccc103abbb8337706607708c7ac8000244000000400000775757006000006004444007767777000000000000000000000000000000000
+700000070077600000022c103ba333b37006600708c77c8000242400028488000775757005665665000760007677777000000000000000000000000000000000
+0777777007444700000ccc103b3a33b3700660070aca7c8a00244400288877800757777005665665000760300766770000000000000000000000000000000000
+070000700677766000022c103b3333b300066000a8c7aca0007cc000288887800775557000555550000763330777770000000000000000000000000000000000
+080000800666660606cccc103b8333b30044420008c77c8007cccc00288888800777777700665660000760300066777700000000000000000000000000000000
+0000000006666660cccccc1033bbbb33000420000ac77c8007cccc00028888207777770700655560000760000077677700000000000000000000000000000000
+0800008000666000777771100333333000042000a8a77c8a007cc000002222007777770006500056000070000007777000000000000000000000000000000000
 __sfx__
 0006000000000000000000000000000001b05000000000000000018050000000000030350000001f05000000000000000014050120501105012050190501b0500000000000000000000000000000000000000000
 d7100000103200e330133300c330103300e330113300e330133300e33015330113300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
