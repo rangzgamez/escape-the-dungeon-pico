@@ -29,6 +29,7 @@ function init_world()
   next_enemy_y = 60
   enemy_spacing = 30 -- reduced spacing for more frequent individual enemies
   
+  xp_orbs = {} -- xp orbs that fly to player
 
   
   -- initial platform
@@ -121,6 +122,7 @@ function update_playing()
   update_player_physics()
   update_player_state()
   update_enemies()
+  update_xp_orbs()
   update_camera()
   update_spikes()
   update_world_generation()
@@ -347,36 +349,90 @@ function check_attack_collision(attack_x, attack_y, attack_w, attack_h)
        enemy.x + enemy.w > attack_x and enemy.x < attack_x + attack_w and
        enemy.y + enemy.h > attack_y and enemy.y < attack_y + attack_h then
         
-      -- combo and scoring
-      combo += 1
-      local multiplier = get_combo_multiplier()
-      xp += flr(5 * multiplier)
-      score += flr(10 * multiplier)
-      
-      -- effects
-      freeze_timer = 4
-      shake_timer = 6
-      shake_intensity = 3
-      
-      -- check player level up
-      if xp >= xp_to_next then
-        xp -= xp_to_next
-        player_level += 1
-        xp_to_next += 5
-        
-        -- start powerup selection with slide animation
-        game_state = "powerup_selection"
-        powerup_cursor = 1
-        powerup_slide_timer = 0
-        powerup_fully_visible = false
-        generate_powerup_options()
-      end
-      
-      refresh_jumps()
-      
-      if rnd(1) < vampire_chance then heal() end
+      hit_enemy(enemy)
       kill_enemy(enemy)
       break
+    end
+  end
+end
+
+function hit_enemy(enemy)
+    -- spawn xp orb at enemy position
+    spawn_xp_orb(enemy.x + enemy.w/2, enemy.y + enemy.h/2)
+    
+    -- combo and scoring
+    combo += 1
+    local multiplier = get_combo_multiplier()
+    xp += flr(5 * multiplier)
+    score += flr(10 * multiplier)
+    
+    -- effects
+    freeze_timer = 4
+    shake_timer = 6
+    shake_intensity = 3
+    
+    -- check player level up
+    if xp >= xp_to_next then
+      xp -= xp_to_next
+      player_level += 1
+      xp_to_next += 5
+      
+      -- start powerup selection with slide animation
+      game_state = "powerup_selection"
+      powerup_cursor = 1
+      powerup_slide_timer = 0
+      powerup_fully_visible = false
+      generate_powerup_options()
+    end
+    
+    refresh_jumps()
+    
+    if rnd(1) < vampire_chance then heal() end
+end
+
+function spawn_xp_orb(x, y)
+  local orb = {
+    x = x,
+    y = y,
+    dx = 0,
+    dy = 0,
+    life = 90, -- frames until auto-collect
+    pulse = 0, -- for pulsing animation
+    size = 2
+  }
+  add(xp_orbs, orb)
+end
+
+function update_xp_orbs()
+  for orb in all(xp_orbs) do
+    orb.life -= 1
+    orb.pulse += 0.2
+    
+    -- move toward player
+    local player_center_x = player.x + player.w/2
+    local player_center_y = player.y + player.h/2
+    
+    local dx = player_center_x - orb.x
+    local dy = player_center_y - orb.y
+    local dist = sqrt(dx*dx + dy*dy)
+    
+    -- acceleration toward player (stronger when closer)
+    local accel = 1--max(0.1, 1 / max(dist, 1))
+    if dist > 0 then
+      orb.dx += (dx / dist) * accel
+      orb.dy += (dy / dist) * accel
+    end
+    
+    -- apply movement with damping
+    orb.dx *= 0.95
+    orb.dy *= 0.95
+    orb.x += orb.dx
+    orb.y += orb.dy
+    
+    -- check if collected
+    if dist < 8 or orb.life <= 0 then
+      del(xp_orbs, orb)
+      -- no need to add xp here - already added in hit_enemy()
     end
   end
 end
@@ -398,6 +454,7 @@ function check_hyper_beam_collisions()
        enemy.y > player.y then -- only hit enemies below the player
       
       -- enemy hit by laser!
+      hit_enemy(enemy)
       kill_enemy(enemy)
     end
   end
@@ -621,6 +678,11 @@ function update_world_generation()
   for enemy in all(enemies) do
     if not enemy.dead and enemy.y > camera_y + 150 then del(enemies, enemy) end
   end
+  
+  -- cleanup orbs that are off-screen
+  for orb in all(xp_orbs) do
+    if orb.y > camera_y + 150 then del(xp_orbs, orb) end
+  end
 end
 
 function update_broken_platform(platform)
@@ -831,6 +893,7 @@ function _draw()
   
   draw_world()
   draw_entities()
+  draw_xp_orbs()
   draw_effects()
   
   camera() -- reset for UI
@@ -941,6 +1004,21 @@ function draw_player()
              jumps_color[jump_color_index])
     pset(player.x + 2, player.y + 2, 0)
     pset(player.x + 4, player.y + 2, 0)
+  end
+end
+
+function draw_xp_orbs()
+  for orb in all(xp_orbs) do
+    -- pulsing blue orb
+    local pulse_size = orb.size + sin(orb.pulse) * 0.5
+    local pulse_color = flr(sin(orb.pulse * 2) * 2) % 2 == 0 and 12 or 1 -- light blue / dark blue
+    
+    -- draw outer glow
+    circfill(orb.x, orb.y, pulse_size + 1, 1) -- dark blue glow
+    -- draw core
+    circfill(orb.x, orb.y, pulse_size, pulse_color)
+    -- draw bright center
+    pset(orb.x, orb.y, 7) -- white center
   end
 end
 
