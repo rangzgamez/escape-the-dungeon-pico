@@ -74,13 +74,19 @@ function init_effects()
   
   -- simple input delay to prevent button bleed
   startup_delay = 6 -- frames to block input after restart
+  
+  -- spike chase system
+  spikes_active = false
+  spikes_grow_timer = 0
+  spikes_grow_duration = 12 -- frames to grow
+  spikes_y = 110 -- starts at initial platform
+  spike_height = 0 -- current height during grow animation
+  max_spike_height = 8 -- full spike height
 end
 
 -- MAIN UPDATE LOOP
 function _update()
   update_effects()
-  
-
   
   if freeze_timer > 0 then return end
   
@@ -116,6 +122,7 @@ function update_playing()
   update_player_state()
   update_enemies()
   update_camera()
+  update_spikes()
   update_world_generation()
   check_collisions()
   update_score_and_level()
@@ -180,6 +187,7 @@ end
 function handle_input()
   -- block input for a few frames after restart to prevent button bleed
   if startup_delay > 0 then return end
+  
   -- movement
   if btn(0) then player.dx -= speed end
   if btn(1) then player.dx += speed end
@@ -314,17 +322,6 @@ function attack()
   -- phantom attacks
   for phantom in all(phantoms) do
     calc_attack(phantom)
-    -- local phantom_attack_x = phantom.x - (attack_w - player.w) / 2
-    -- local phantom_attack_y = phantom.y + player.h - 2
-    -- check_attack_collision(phantom_attack_x, phantom_attack_y, attack_w, attack_h)
-    
-    -- if overhead_slices > 0 then
-    --   local slice_w = 8 + overhead_slices * 4
-    --   local slice_h = 6 + overhead_slices * 2
-    --   local phantom_slice_x = phantom.x - (slice_w - player.w) / 2
-    --   local phantom_slice_y = phantom.y - slice_h - 2
-    --   check_attack_collision(phantom_slice_x, phantom_slice_y, slice_w, slice_h)
-    -- end
   end
 end
 
@@ -349,7 +346,35 @@ function check_attack_collision(attack_x, attack_y, attack_w, attack_h)
     if not enemy.dead and 
        enemy.x + enemy.w > attack_x and enemy.x < attack_x + attack_w and
        enemy.y + enemy.h > attack_y and enemy.y < attack_y + attack_h then
+        
+      -- combo and scoring
+      combo += 1
+      local multiplier = get_combo_multiplier()
+      xp += flr(5 * multiplier)
+      score += flr(10 * multiplier)
       
+      -- effects
+      freeze_timer = 4
+      shake_timer = 6
+      shake_intensity = 3
+      
+      -- check player level up
+      if xp >= xp_to_next then
+        xp -= xp_to_next
+        player_level += 1
+        xp_to_next += 5
+        
+        -- start powerup selection with slide animation
+        game_state = "powerup_selection"
+        powerup_cursor = 1
+        powerup_slide_timer = 0
+        powerup_fully_visible = false
+        generate_powerup_options()
+      end
+      
+      refresh_jumps()
+      
+      if rnd(1) < vampire_chance then heal() end
       kill_enemy(enemy)
       break
     end
@@ -387,35 +412,7 @@ function kill_enemy(enemy)
   local fling_direction_x = enemy.x < player.x and -1 or 1
   enemy.dx = fling_direction_x * (2 + rnd(2))
   enemy.dy = -1 * (1.5 + rnd(1.5))
-  
-  -- combo and scoring
-  combo += 1
-  local multiplier = get_combo_multiplier()
-  xp += flr(5 * multiplier)
-  score += flr(10 * multiplier)
-  
-  -- effects
-  freeze_timer = 4
-  shake_timer = 6
-  shake_intensity = 3
-  
-  -- check player level up
-  if xp >= xp_to_next then
-    xp -= xp_to_next
-    player_level += 1
-    xp_to_next += 5
-    
-    -- start powerup selection with slide animation
-    game_state = "powerup_selection"
-    powerup_cursor = 1
-    powerup_slide_timer = 0
-    powerup_fully_visible = false
-    generate_powerup_options()
-  end
-  
-  refresh_jumps()
-  
-  if rnd(1) < vampire_chance then heal() end
+
 end
 
 function get_combo_multiplier()
@@ -474,6 +471,7 @@ end
 function check_collisions()
   check_platform_collisions()
   check_enemy_collisions()
+  check_spike_collisions()
 end
 
 function check_platform_collisions()
@@ -481,7 +479,7 @@ function check_platform_collisions()
   grounded = false
   
   for platform in all(platforms) do
-    if player.dy > 0 and
+    if not platform.broken and player.dy > 0 and
        player.y + player.h > platform.y and
        player.y + player.h < platform.y + 8 and
        player.x + player.w > platform.x and
@@ -529,17 +527,76 @@ function check_enemy_collisions()
   end
 end
 
+function check_spike_collisions()
+  if not spikes_active or spike_height <= 0 then return end
+  
+  local spike_top = spikes_y - spike_height
+  
+  -- check player collision
+  if player.y + player.h > spike_top and player.y + player.h < spikes_y + 8 then
+    -- instant death from spikes!
+    hearts = 0
+  end
+  
+  -- check enemy collisions
+  for enemy in all(enemies) do
+    if not enemy.dead and 
+       enemy.y + enemy.h > spike_top and enemy.y + enemy.h < spikes_y + 8 then
+      -- enemy killed by spikes!
+      kill_enemy(enemy)
+    end
+  end
+  
+  -- check platform collisions
+  for platform in all(platforms) do
+    if not platform.broken and 
+       platform.y + 8 > spike_top and platform.y < spikes_y + 8 then
+      -- platform destroyed by spikes!
+      break_platform(platform)
+    end
+  end
+end
+
+
 -- CAMERA SYSTEM
 function update_camera()
   local target_camera_y = player.y - camera_follow_y
   if target_camera_y < camera_y and player.dy < 0 and camera_sp > player.dy then
     camera_y = camera_y + (target_camera_y - camera_y) * 0.1
     if camera_sp == 0 then
-      camera_sp = -0.3 
+      camera_sp = -0.3
+      -- activate spikes when camera starts auto-scrolling!
+      activate_spikes()
     end
   else
     camera_y += camera_sp
   end
+end
+
+function activate_spikes()
+  if not spikes_active then
+    spikes_active = true
+    spikes_grow_timer = spikes_grow_duration
+    
+    -- dramatic screen shake to signal danger
+    shake_timer = 20
+    shake_intensity = 4
+  end
+end
+
+function update_spikes()
+  if not spikes_active then return end
+  
+  -- grow animation
+  if spikes_grow_timer > 0 then
+    spikes_grow_timer -= 1
+    spike_height = max_spike_height * (1 - spikes_grow_timer / spikes_grow_duration)
+  else
+    spike_height = max_spike_height
+  end
+  
+  -- follow camera at same speed (stay at bottom of screen)
+  spikes_y = camera_y + 128 - 8 -- 8px above bottom of screen
 end
 
 -- WORLD GENERATION
@@ -551,11 +608,30 @@ function update_world_generation()
   
   -- cleanup
   for platform in all(platforms) do
-    if platform.y > camera_y + 150 then del(platforms, platform) end
+    if platform.broken then
+      update_broken_platform(platform)
+      if platform.break_timer <= 0 then
+        del(platforms, platform)
+      end
+    elseif platform.y > camera_y + 150 then 
+      del(platforms, platform) 
+    end
   end
   
   for enemy in all(enemies) do
     if not enemy.dead and enemy.y > camera_y + 150 then del(enemies, enemy) end
+  end
+end
+
+function update_broken_platform(platform)
+  platform.break_timer -= 1
+  
+  -- update falling pieces
+  for piece in all(platform.pieces) do
+    piece.dy += 0.2 -- gravity
+    piece.x += piece.dx
+    piece.y += piece.dy
+    piece.dx *= 0.98 -- slight air resistance
   end
 end
 
@@ -590,6 +666,31 @@ function add_enemy()
   
   -- space out enemy generation (smaller spacing for more frequent enemies)
   next_enemy_y -= enemy_spacing + flr(rnd(20)) -- reduced variance for more consistent spacing
+end
+
+function break_platform(platform)
+  platform.broken = true
+  platform.break_timer = 30 -- animation duration
+  platform.pieces = {}
+  
+  -- create falling pieces
+  local piece_count = flr(platform.w / 8) + 2
+  for i = 1, piece_count do
+    local piece = {
+      x = platform.x + (i - 1) * (platform.w / piece_count) + rnd(4) - 2,
+      y = platform.y + rnd(2),
+      w = 4 + rnd(4),
+      h = 2 + rnd(4),
+      dx = (rnd(2) - 1) * 1.5,
+      dy = -rnd(1) - 0.5,
+      color = (rnd(1) < 0.5) and 11 or 3 -- mix of platform colors
+    }
+    add(platform.pieces, piece)
+  end
+  
+  -- screen shake from destruction
+  shake_timer = 8
+  shake_intensity = 2
 end
 
 -- SCORING AND PROGRESSION
@@ -642,10 +743,6 @@ function shuffle(t)
   end
 end
 
---4399
---4374
-
---4361
 function generate_powerup_options()
   powerup_options = {}
   
@@ -661,7 +758,7 @@ function generate_powerup_options()
       attack_h *= 1.2
     end},
     {name = "armor", effect = "+20% invuln", type = "powerup", spr = 9, func = function () invuln_time *= 1.2 end},
-    {name = "radar", effect = "show upcoming enemies", type = "powerup", func = function () radar_count += 1 end},
+    {name = "radar", effect = "show upcoming enemies", spr = 3, type = "powerup", func = function () radar_count += 1 end},
   }
   
   local rare_powers = {
@@ -669,7 +766,6 @@ function generate_powerup_options()
     {name = "sky slice", effect = "overhead cut", type = "powerup", spr = 4, func = function () overhead_slices += 1 end},
     {name = "vampire", effect = "chance to heal", type = "powerup", spr = 0, func = function () vampire_chance += .1 end},
     {name = "phantom", effect = "ghost ally", type = "powerup", spr = 8, func = function () add(phantoms, {x = player.x, y = player.y, offset_x = (15 + #phantoms * 5) * ((#phantoms % 2 * -2) + 1)}) end},
-
   }
   
   local common_items = {
@@ -719,7 +815,6 @@ function apply_powerup(powerup)
     return
   end
   powerup.func()
-
 end
 
 -- DRAWING SYSTEM
@@ -750,8 +845,59 @@ end
 
 function draw_world()
   for platform in all(platforms) do
-    rectfill(platform.x, platform.y, platform.x + platform.w - 1, platform.y + 3, 11)
-    rectfill(platform.x, platform.y + 4, platform.x + platform.w - 1, platform.y + 7, 3)
+    if platform.broken then
+      draw_broken_platform(platform)
+    else
+      rectfill(platform.x, platform.y, platform.x + platform.w - 1, platform.y + 3, 11)
+      rectfill(platform.x, platform.y + 4, platform.x + platform.w - 1, platform.y + 7, 3)
+    end
+  end
+  
+  draw_spikes()
+end
+
+function draw_broken_platform(platform)
+  -- draw falling pieces
+  for piece in all(platform.pieces) do
+    rectfill(piece.x, piece.y, piece.x + piece.w - 1, piece.y + piece.h - 1, piece.color)
+  end
+  
+  -- optional: draw some dust/debris particles
+  if platform.break_timer > 20 then
+    for i = 1, 3 do
+      local px = platform.x + rnd(platform.w)
+      local py = platform.y + rnd(8) - 4
+      pset(px, py, 6) -- light brown dust
+    end
+  end
+end
+
+function draw_spikes()
+  if not spikes_active or spike_height <= 0 then return end
+  
+  -- draw the spike platform base
+  rectfill(0, spikes_y, 127, spikes_y + 7, 3) -- dark brown base
+  
+  -- draw triangular spikes growing from the platform
+  local spike_spacing = 6 -- distance between spike centers
+  local spike_width = 4
+  
+  for x = 2, 126, spike_spacing do
+    local spike_top = spikes_y - spike_height
+    local spike_left = x - spike_width / 2
+    local spike_right = x + spike_width / 2
+    
+    -- draw triangular spike (pointing up)
+    for y = spike_top, spikes_y do
+      local progress = (y - spike_top) / spike_height
+      local width = spike_width * progress
+      local left = x - width / 2
+      local right = x + width / 2
+      
+      if left <= right then
+        line(left, y, right, y, 8) -- red spikes
+      end
+    end
   end
 end
 
@@ -1100,8 +1246,6 @@ function draw_powerup_selection()
     local rarity_color = selected.rarity == "rare" and 14 or 7
     print(rarity_text, rarity_x, details_y + 24, rarity_color)
     
-    -- Instructions
-    print("use ヌ●…ヌ●★ to select, ❎/z to confirm", slide_offset + 16, 105, 6)
   end
 end
 
@@ -1117,7 +1261,7 @@ function draw_gameover()
   
   -- Background (slides in too)
   rectfill(slide_offset, 30, slide_offset + 128, 98, 0)
-  rect(slide_offset, 30, slide_offset + 128, 98, 8)
+  rect(slide_offset, 30, slide_offset + 127, 98, 8)
   
   -- Title
   print("you died...", slide_offset + 42, 40, 8)
@@ -1141,8 +1285,6 @@ function draw_gameover()
     print("retry", slide_offset + 44, 66, retry_color)
     print("quit", slide_offset + 46, 78, quit_color)
     
-    -- Instructions
-    print("use ヌ●♪ヌ●ヌ▥つ to select, ❎/z to confirm", slide_offset + 8, 88, 5)
   end
 end
 
